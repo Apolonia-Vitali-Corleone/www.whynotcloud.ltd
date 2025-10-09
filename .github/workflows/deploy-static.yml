@@ -127,14 +127,20 @@ jobs:
           set -euo pipefail
           DIST_DIR="dist"
 
-          # 基础：根目录首页
+          if [[ ! -d "$DIST_DIR" ]]; then
+            echo "Dist dir not found: $DIST_DIR"
+            exit 1
+          fi
+
+          # 必备：根路径与首页
           PATHS=("/" "/index.html")
 
-          # 把所有 HTML 都加入；index.html 额外加入目录形式
+          # 收集所有 .html；对 */index.html 额外加入目录形式 (/dir/)
           while IFS= read -r -d '' f; do
-            rel="${f#${DIST_DIR}/}"
-            path="/${rel}"
-            PATHS+=("$path")
+            rel="${f#${DIST_DIR}/}"      # 相对 dist/
+            [[ -z "$rel" ]] && continue
+            p="/${rel}"                  # 例如 /cn/index.html 或 /about.html
+            PATHS+=("$p")
             base="$(basename "$rel")"
             dir="/$(dirname "$rel")"
             if [[ "$base" == "index.html" ]]; then
@@ -143,31 +149,34 @@ jobs:
             fi
           done < <(find "$DIST_DIR" -type f -name '*.html' -print0)
 
-          # 去重
-          uniq_paths=()
+          # 去重 & 规范化（确保以 / 开头）
           declare -A seen=()
+          uniq_paths=()
           for p in "${PATHS[@]}"; do
+            [[ "${p:0:1}" != "/" ]] && p="/${p}"
             if [[ -z "${seen[$p]+x}" ]]; then
-              uniq_paths+=("$p"); seen[$p]=1
+              uniq_paths+=("$p")
+              seen[$p]=1
             fi
           done
 
-          echo "Invalidating ${#uniq_paths[@]} paths:"
-          printf '%s\n' "${uniq_paths[@]}"
+          total="${#uniq_paths[@]}"
+          echo "Will invalidate ${total} unique paths."
+          if (( total == 0 )); then
+            echo "No paths to invalidate; skipping."
+            exit 0
+          fi
+          if (( total > 1000 )); then
+            echo "Collected ${total} paths (>1000). Please narrow invalidation or split."
+            exit 1
+          fi
 
-          # CloudFront 每次最多 1000 条；如超出则分批提交
-          batch=()
-          count=0
-          for p in "${uniq_paths[@]}"; do
-            batch+=("$p"); ((count++))
-            if (( count == 1000 )); then
-              aws cloudfront create-invalidation --distribution-id "${CF_DISTRIBUTION_ID}" --paths "${batch[@]}"
-              batch=(); count=0
-            fi
-          done
-          if (( count > 0 )); then
-            aws cloudfront create-invalidation --distribution-id "${CF_DISTRIBUTION_ID}" --paths "${batch[@]}"
+          # 打印清单，便于排查
+          printf 'Path: %s\n' "${uniq_paths[@]}"
 
-          echo "::group::Deployed (dist/, maxdepth=2)"
-          find "$DIST_DIR" -maxdepth 2 -type f -print | sort || true
-          echo "::endgroup::"
+          # 执行失效
+          export AWS_PAGER=""
+          aws cloudfront create-invalidation \
+            --no-cli-pager \
+            --distribution-id "${CF_DISTRIBUTION_ID}" \
+            --paths "${uniq_paths[@]}"
