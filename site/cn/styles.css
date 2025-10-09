@@ -1,0 +1,64 @@
+/* ===== 基础设置：更好看的默认字体、颜色与排版 ===== */
+:root { /* 定义一组颜色变量，方便统一管理 */
+  --bg: #ffffff;        /* 页面背景色（浅色模式） */
+  --fg: #1f2937;        /* 主文本颜色 */
+  --muted: #6b7280;     /* 次要文字颜色 */
+  --accent: #2563eb;    /* 强调色（链接等） */
+  --border: #e5e7eb;    /* 分割线/边框色 */
+}
+
+
+/* ===== 布局：把内容居中、控制行宽，阅读舒适 ===== */
+body {
+  max-width: 720px;     /* 控制行宽，读起来不累 */
+  margin: 0 auto;       /* 居中 */
+  padding: 32px 20px;   /* 留一些边距，避免贴边 */
+  font-size: 1.2rem;
+}
+
+/* ===== 标题：层级清楚、间距克制 ===== */
+h1, h2 {
+  margin: 0;                     /* 统一由下面的间距规则控制 */
+  line-height: 1.3;              /* 标题更紧凑 */
+}
+
+h1 {
+  font-size: 2rem;               /* 主标题大小 */
+  letter-spacing: 0.8px;         /* 轻微字距 */
+  margin-bottom: 16px;           /* 与下文的间距 */
+  border-bottom: 1px solid var(--border); /* 底部细分割线 */
+  padding-bottom: 12px;          /* 分割线与文字的内边距 */
+}
+
+h2 {
+  font-size: 1.5rem;               /* 主标题大小 */
+  letter-spacing: 0.8px;         /* 轻微字距 */
+  margin-top: 28px;              /* 与前文拉开 */
+  margin-bottom: 8px;            /* 与正文靠近 */
+  border-bottom: 1px solid var(--border); /* 底部细分割线 */
+  padding-bottom: 12px;          /* 分割线与文字的内边距 */
+}
+
+/* 统一链接颜色 */
+a {
+  color: #301ecf;              /* 链接文字颜色：蓝色（你自定义的值） */
+  text-decoration: none;         /* 去掉默认的下划线 */
+}
+
+a:hover {
+  text-decoration: underline;  /* 鼠标悬停时加上下划线，作为交互反馈 */
+}
+
+/* 关键：已访问 & 正在点击 状态也用同色 */
+a:visited,
+a:active {
+  color: #0a66c2;
+}
+
+/*
+给键盘用户保留清晰的焦点样式（无障碍）
+*/
+a:focus-visible {
+  outline: 2px solid #0a66c2;
+  outline-offset: 2px;
+}
