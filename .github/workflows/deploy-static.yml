@@ -101,6 +101,9 @@ jobs:
           set -euo pipefail
           python3 ".github/scripts/rewrite_refs.py" --dist "dist" --mapping "dist/.fingerprint_map.txt"
 
+      - name: Cleanup fingerprint map
+        run: rm -f dist/.fingerprint_map.txt
+      
       # 指纹资源：长缓存 + immutable；排除所有 .html
       - name: Upload versioned assets (long cache)
         shell: bash
