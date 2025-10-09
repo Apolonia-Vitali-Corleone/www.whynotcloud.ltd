@@ -6,6 +6,7 @@ on:
     paths:
       - 'site/**'
       - '.github/workflows/deploy-static.yml'
+      - '.github/scripts/rewrite_refs.py'
   workflow_dispatch: {}
 
 concurrency:
@@ -56,7 +57,7 @@ jobs:
         run: aws sts get-caller-identity
 
       # ========= 指纹化：只处理非 HTML 文件；HTML 保持原名 =========
-      - name: Fingerprint assets (non-HTML only) + rewrite references robustly
+      - name: Fingerprint assets (non-HTML only)
         shell: bash
         run: |
           set -euo pipefail
@@ -72,7 +73,7 @@ jobs:
                 cp -a "$f" "${DIST_DIR}/${rel}"
               done
 
-          # 2) 对非 HTML 文件加指纹并复制，记录 original_rel -> hashed_rel
+          # 2) 对非 HTML 文件加指纹并复制；记录 original_rel -> hashed_rel
           MAPPING_FILE="${DIST_DIR}/.fingerprint_map.txt"
           : > "$MAPPING_FILE"
           while IFS= read -r -d '' f; do
@@ -90,75 +91,15 @@ jobs:
             printf '%s %s\n' "$rel" "${dir}/${hashed}" >> "$MAPPING_FILE"
           done < <(find "${SRC_DIR}" -type f ! -name '*.html' -print0)
 
-          # 3) 逐文件解析并重写 href/src/url(...)，正确处理相对路径与 basename 唯一映射
-          python3 - << 'PY'
-import re, os, pathlib
-DIST = pathlib.Path("dist").resolve()
-
-# 读映射 original_rel -> hashed_rel（均为相对站点根、不以 / 开头）
-mapping = {}
-basename_count = {}
-with open(DIST/".fingerprint_map.txt", "r", encoding="utf-8") as fp:
-    for line in fp:
-        o, h = line.strip().split(" ", 1)
-        mapping[o] = h
-        bn = os.path.basename(o)
-        basename_count[bn] = basename_count.get(bn, 0) + 1
-
-targets = []
-for ext in (".html", ".css", ".js", ".map"):
-    targets += list(DIST.rglob(f"*{ext}"))
-
-ATTR_RE = re.compile(r'(?P<prefix>\b(?:href|src)\s*=\s*["\'])(?P<url>[^"\'#?\s>]+)(?P<suffix>[^"\']*["\'])', re.IGNORECASE)
-URL_FUNC_RE = re.compile(r'(?P<prefix>\burl\(\s*["\']?)(?P<url>[^"\')#?\s]+)(?P<suffix>[^"\')]*["\']?\s*\))', re.IGNORECASE)
-
-def norm_from_view(file_dir: pathlib.Path, u: str):
-    if u.startswith(("http://","https://","data:")):
-        return None
-    if u.startswith("/"):
-        rel_to_root = u[1:]
-    else:
-        abs_target = (file_dir / u).resolve()
-        try:
-            rel_to_root = str(abs_target.relative_to(DIST))
-        except ValueError:
-            return None
-    return os.path.normpath(rel_to_root)
-
-def rel_from_view(file_dir: pathlib.Path, rel_to_root: str) -> str:
-    target_path = (DIST / rel_to_root).resolve()
-    return os.path.relpath(target_path, file_dir)
-
-def rewrite_text(p: pathlib.Path, text: str) -> str:
-    file_dir = p.parent
-    def _do_sub(m):
-        url = m.group("url")
-        norm = norm_from_view(file_dir, url)
-        replacement = None
-        if norm and norm in mapping:
-            replacement = rel_from_view(file_dir, mapping[norm])
-        else:
-            bn = os.path.basename(url)
-            if "/" not in url and basename_count.get(bn) == 1:
-                original = next(k for k in mapping.keys() if os.path.basename(k) == bn)
-                replacement = rel_from_view(file_dir, mapping[original])
-        if replacement:
-            return f"{m.group('prefix')}{replacement}{m.group('suffix')}"
-        return m.group(0)
-    text2 = ATTR_RE.sub(_do_sub, text)
-    text2 = URL_FUNC_RE.sub(_do_sub, text2)
-    return text2
-
-for p in targets:
-    t = p.read_text(encoding="utf-8", errors="ignore")
-    new = rewrite_text(p, t)
-    if new != t:
-        p.write_text(new, encoding="utf-8")
-PY
-
-          echo "::group::Built files (dist/, maxdepth=2)"
+          echo "::group::Built (before rewrite)"
           find "$DIST_DIR" -maxdepth 2 -type f -print | sort
           echo "::endgroup::"
+
+      - name: Rewrite references (href/src/url(...))
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ".github/scripts/rewrite_refs.py" --dist "dist" --mapping "dist/.fingerprint_map.txt"
 
       # 指纹资源：长缓存 + immutable；排除所有 .html
       - name: Upload versioned assets (long cache)
@@ -189,17 +130,16 @@ PY
           # 基础：根目录首页
           PATHS=("/" "/index.html")
 
-          # 收集所有 HTML；对 index.html 额外加入目录形式的无文件名路径
+          # 把所有 HTML 都加入；index.html 额外加入目录形式
           while IFS= read -r -d '' f; do
-            rel="${f#${DIST_DIR}/}"           # 相对 dist/
-            path="/${rel}"                    # 例如 /cn/index.html 或 /about.html
+            rel="${f#${DIST_DIR}/}"
+            path="/${rel}"
             PATHS+=("$path")
             base="$(basename "$rel")"
             dir="/$(dirname "$rel")"
             if [[ "$base" == "index.html" ]]; then
-              # 目录形式路径（/cn/）
               [[ "$dir" == "/." ]] && dir="/"
-              PATHS+=("${dir%/}/")            # 规范化末尾斜杠
+              PATHS+=("${dir%/}/")
             fi
           done < <(find "$DIST_DIR" -type f -name '*.html' -print0)
 
@@ -208,8 +148,7 @@ PY
           declare -A seen=()
           for p in "${PATHS[@]}"; do
             if [[ -z "${seen[$p]+x}" ]]; then
-              uniq_paths+=("$p")
-              seen[$p]=1
+              uniq_paths+=("$p"); seen[$p]=1
             fi
           done
 
@@ -220,8 +159,7 @@ PY
           batch=()
           count=0
           for p in "${uniq_paths[@]}"; do
-            batch+=("$p")
-            ((count++))
+            batch+=("$p"); ((count++))
             if (( count == 1000 )); then
               aws cloudfront create-invalidation --distribution-id "${CF_DISTRIBUTION_ID}" --paths "${batch[@]}"
               batch=(); count=0
@@ -229,4 +167,7 @@ PY
           done
           if (( count > 0 )); then
             aws cloudfront create-invalidation --distribution-id "${CF_DISTRIBUTION_ID}" --paths "${batch[@]}"
-          fi
+
+          echo "::group::Deployed (dist/, maxdepth=2)"
+          find "$DIST_DIR" -maxdepth 2 -type f -print | sort || true
+          echo "::endgroup::"
