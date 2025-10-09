@@ -1,4 +1,4 @@
-name: Deploy Static Files of Personal Website
+name: Deploy static site
 
 on:
   push:
@@ -30,19 +30,21 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Show workflow context
+        shell: bash
         run: |
+          set -euo pipefail
           echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
           echo "AWS_REGION: ${AWS_REGION}"
           echo "ROLE_ARN: ${ROLE_ARN}"
           echo "S3_BUCKET: ${S3_BUCKET}"
           echo "CF_DISTRIBUTION_ID: ${CF_DISTRIBUTION_ID}"
           echo "SITE_DIR (relative): ${SITE_DIR}"
-          echo "SITE_DIR (absolute): $(realpath "${SITE_DIR}")"
+          echo "SITE_DIR (absolute): $(realpath "${SITE_DIR}" 2>/dev/null || echo "<not found>")"
           echo "Commit: ${GITHUB_SHA}"
           echo "::group::List SITE_DIR (maxdepth=2)"
-          find "${SITE_DIR}" -maxdepth 2 -type f -print | sort
+          find "${SITE_DIR}" -maxdepth 2 -type f -print | sort || true
           echo "::endgroup::"
-        
+
       - name: Configure AWS (assume role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -50,4 +52,71 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Who am I (AWS identity)
+        shell: bash
         run: aws sts get-caller-identity
+
+      # ========= 指纹化（除 index.html 外全部指纹） =========
+      - name: Fingerprint assets (hash all but index.html)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC_DIR="${SITE_DIR}"
+          DIST_DIR="dist"
+          rm -rf "$DIST_DIR" && mkdir -p "$DIST_DIR"
+
+          # 1) 保留 index.html 原名
+          cp -a "${SRC_DIR}/index.html" "${DIST_DIR}/index.html"
+
+          # 2) 其他文件全部按内容哈希重命名为 name.<hash>.ext
+          MAPPING_FILE="$(mktemp)"
+          while IFS= read -r -d '' f; do
+            rel="${f#${SRC_DIR}/}"
+            dir="$(dirname "$rel")"
+            base="$(basename "$rel")"
+            name="${base%.*}"
+            ext="${base##*.}"
+            if [[ "$base" == "$ext" ]]; then ext=""; dot=""; else dot="."; fi
+            hash="$(sha256sum "$f" | cut -c1-10)"
+            dst_dir="${DIST_DIR}/${dir}"
+            mkdir -p "$dst_dir"
+            hashed="${name}.${hash}${dot}${ext}"
+            cp -a "$f" "${dst_dir}/${hashed}"
+            printf '%s %s\n' "$rel" "${dir}/${hashed}" >> "$MAPPING_FILE"
+          done < <(find "${SRC_DIR}" -type f ! -name 'index.html' -print0)
+
+          # 3) 改写 dist 中的引用（HTML/CSS/JS/SourceMap）
+          while read -r original hashed; do
+            find "$DIST_DIR" -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' -o -name '*.map' \) -print0 \
+              | xargs -0 sed -i -e "s|${original}|${hashed}|g"
+          done < "$MAPPING_FILE"
+
+          echo "::group::Built files (dist/, maxdepth=2)"
+          find "$DIST_DIR" -maxdepth 2 -type f -print | sort
+          echo "::endgroup::"
+
+      # ========= 上传至 S3：指纹资源长缓存；index.html 不缓存 =========
+      - name: Upload versioned assets (long cache)
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws s3 sync "dist/" "s3://${S3_BUCKET}/" \
+            --delete \
+            --exclude "index.html" \
+            --cache-control "public, max-age=31536000, immutable"
+
+      - name: Upload index.html (no cache)
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws s3 cp "dist/index.html" "s3://${S3_BUCKET}/index.html" \
+            --cache-control "no-cache, no-store, max-age=0, must-revalidate" \
+            --content-type "text/html; charset=utf-8"
+
+      # ========= CloudFront 失效：仅首页 =========
+      - name: Invalidate CloudFront (/, /index.html)
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws cloudfront create-invalidation \
+            --distribution-id "${CF_DISTRIBUTION_ID}" \
+            --paths "/" "/index.html"
