@@ -55,8 +55,8 @@ jobs:
         shell: bash
         run: aws sts get-caller-identity
 
-      # ========= 指纹化（除 index.html 外全部指纹） =========
-      - name: Fingerprint assets (hash all but index.html)
+      # ========= 指纹化：只处理非 HTML 文件；所有 .html 保持原名 =========
+      - name: Fingerprint assets (non-HTML only)
         shell: bash
         run: |
           set -euo pipefail
@@ -64,10 +64,16 @@ jobs:
           DIST_DIR="dist"
           rm -rf "$DIST_DIR" && mkdir -p "$DIST_DIR"
 
-          # 1) 保留 index.html 原名
-          cp -a "${SRC_DIR}/index.html" "${DIST_DIR}/index.html"
+          # 1) 复制所有 HTML 原样保留（包括 index.html、welcome.html 等）
+          find "${SRC_DIR}" -type f -name '*.html' -print0 \
+            | while IFS= read -r -d '' f; do
+                rel="${f#${SRC_DIR}/}"
+                dst_dir="${DIST_DIR}/$(dirname "$rel")"
+                mkdir -p "$dst_dir"
+                cp -a "$f" "${dst_dir}/"
+              done
 
-          # 2) 其他文件全部按内容哈希重命名为 name.<hash>.ext
+          # 2) 对非 HTML 文件加指纹并复制
           MAPPING_FILE="$(mktemp)"
           while IFS= read -r -d '' f; do
             rel="${f#${SRC_DIR}/}"
@@ -82,9 +88,11 @@ jobs:
             hashed="${name}.${hash}${dot}${ext}"
             cp -a "$f" "${dst_dir}/${hashed}"
             printf '%s %s\n' "$rel" "${dir}/${hashed}" >> "$MAPPING_FILE"
-          done < <(find "${SRC_DIR}" -type f ! -name 'index.html' -print0)
+            # 如果你的页面里用绝对路径（以 / 开头），顺带写一条绝对映射，确保替换命中：
+            printf '/%s %s\n' "$rel" "/${dir}/${hashed}" >> "$MAPPING_FILE"
+          done < <(find "${SRC_DIR}" -type f ! -name '*.html' -print0)
 
-          # 3) 改写 dist 中的引用（HTML/CSS/JS/SourceMap）
+          # 3) 只在文本文件中改写引用（HTML/CSS/JS/SourceMap）
           while read -r original hashed; do
             find "$DIST_DIR" -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' -o -name '*.map' \) -print0 \
               | xargs -0 sed -i -e "s|${original}|${hashed}|g"
@@ -94,29 +102,37 @@ jobs:
           find "$DIST_DIR" -maxdepth 2 -type f -print | sort
           echo "::endgroup::"
 
-      # ========= 上传至 S3：指纹资源长缓存；index.html 不缓存 =========
+      # 指纹资源：长缓存 + immutable；排除所有 .html
       - name: Upload versioned assets (long cache)
         shell: bash
         run: |
           set -euo pipefail
           aws s3 sync "dist/" "s3://${S3_BUCKET}/" \
             --delete \
-            --exclude "index.html" \
+            --exclude "*.html" \
             --cache-control "public, max-age=31536000, immutable"
 
-      - name: Upload index.html (no cache)
+      # 所有 HTML：禁止缓存（覆盖整个站点的 .html）
+      - name: Upload HTML (no cache)
         shell: bash
         run: |
           set -euo pipefail
-          aws s3 cp "dist/index.html" "s3://${S3_BUCKET}/index.html" \
+          aws s3 sync "dist/" "s3://${S3_BUCKET}/" \
+            --exclude "*" --include "*.html" \
             --cache-control "no-cache, no-store, max-age=0, must-revalidate" \
             --content-type "text/html; charset=utf-8"
 
-      # ========= CloudFront 失效：仅首页 =========
-      - name: Invalidate CloudFront (/, /index.html)
+      - name: Invalidate CloudFront (HTML entry points)
         shell: bash
         run: |
           set -euo pipefail
+          # 最低限度失效首页（/ 与 /index.html）
+          PATHS=("/" "/index.html")
+
+          # 如果有目录索引页（如 /docs/ -> /docs/index.html），按需追加：
+          # PATHS+=("/docs/" "/docs/index.html")
+
           aws cloudfront create-invalidation \
             --distribution-id "${CF_DISTRIBUTION_ID}" \
-            --paths "/" "/index.html"
+            --paths "${PATHS[@]}"
+
