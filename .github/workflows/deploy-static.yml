@@ -42,3 +42,12 @@ jobs:
           echo "::group::List SITE_DIR (maxdepth=2)"
           find "${SITE_DIR}" -maxdepth 2 -type f -print | sort
           echo "::endgroup::"
+        
+      - name: Configure AWS (assume role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Who am I (AWS identity)
+        run: aws sts get-caller-identity
