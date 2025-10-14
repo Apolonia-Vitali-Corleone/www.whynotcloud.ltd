@@ -1,54 +1,79 @@
 <!doctype html>
-<html>
+<html lang="zh-Hans">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Serverless Landing Demo</title>
-  <style>body{font-family:system-ui,Arial;margin:40px;max-width:820px}input,button{padding:8px;margin:4px}</style>
+  <title>无服务器互动演示页</title>
+  <style>
+    body {font-family: system-ui, Arial, sans-serif; margin: 40px auto; max-width: 820px; line-height: 1.6; color: #1f2933;}
+    header {margin-bottom: 32px;}
+    h1 {font-size: 2rem; margin-bottom: 8px;}
+    section {margin-bottom: 36px; padding: 24px; border: 1px solid #d2d6dc; border-radius: 12px; background: #f9fafb;}
+    section h2 {margin-top: 0; font-size: 1.4rem;}
+    label {display: block; margin: 12px 0 4px; font-weight: 600;}
+    input, textarea, button {width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cbd5e0; border-radius: 8px; font-size: 1rem;}
+    textarea {min-height: 120px; resize: vertical;}
+    button {margin-top: 16px; cursor: pointer; background: #2563eb; color: #fff; border: none; font-weight: 600;}
+    pre {background: #1f2933; color: #f9fafb; padding: 12px 16px; border-radius: 8px; overflow-x: auto; font-size: 0.95rem;}
+    footer {margin-top: 48px; text-align: center; font-size: 0.95rem; color: #52606d;}
+  </style>
 </head>
 <body>
-  <h1>Serverless Landing Demo</h1>
-  <p>Welcome! This is a static page served from S3 via CloudFront. API is under <code>/api/*</code>.</p>
+  <header>
+    <h1>无服务器互动演示页</h1>
+    <p>此页面从 S3 通过 CloudFront 发布，展示订阅与联系等表单如何与后端 API（路径 <code>/api/*</code>）协同工作。</p>
+  </header>
 
-  <h2>Subscribe</h2>
-  <input id="subEmail" type="email" placeholder="email@example.com" />
-  <button onclick="subscribe()">Subscribe</button>
-  <pre id="subOut"></pre>
+  <main>
+    <section>
+      <h2>订阅更新</h2>
+      <p>留下邮箱即可收到最新动态。</p>
+      <label for="subEmail">电子邮箱</label>
+      <input id="subEmail" type="email" placeholder="you@example.com" />
+      <button onclick="subscribe()">提交订阅</button>
+      <pre id="subOut"></pre>
+    </section>
 
-  <h2>Contact</h2>
-  <input id="name" placeholder="name"/>
-  <input id="email" placeholder="email"/>
-  <br/>
-  <textarea id="message" placeholder="your message" rows="4" cols="60"></textarea><br/>
-  <button onclick="contact()">Send</button>
-  <pre id="contactOut"></pre>
+    <section>
+      <h2>联系我</h2>
+      <p>有合作想法或建议？欢迎直接留言。</p>
+      <label for="name">姓名</label>
+      <input id="name" placeholder="您的姓名" />
+      <label for="email">电子邮箱</label>
+      <input id="email" type="email" placeholder="you@example.com" />
+      <label for="message">留言内容</label>
+      <textarea id="message" placeholder="请在此输入您的留言"></textarea>
+      <button onclick="contact()">发送消息</button>
+      <pre id="contactOut"></pre>
+    </section>
+  </main>
 
-<script>
-async function subscribe(){
-  const email = document.getElementById('subEmail').value;
-  const res = await fetch('/api/subscribe', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({email})
-  });
-  document.getElementById('subOut').textContent = await res.text();
-}
+  <footer>
+    <p>CloudFront Function 会设置 <code>ab-variant</code> Cookie，用于 A/B 测试。</p>
+  </footer>
 
-async function contact(){
-  const name = document.getElementById('name').value;
-  const email = document.getElementById('email').value;
-  const message = document.getElementById('message').value;
-  const res = await fetch('/api/contact', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({name,email,message})
-  });
-  document.getElementById('contactOut').textContent = await res.text();
-}
-</script>
+  <script>
+  async function subscribe() {
+    const email = document.getElementById('subEmail').value;
+    const res = await fetch('/api/subscribe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ email })
+    });
+    document.getElementById('subOut').textContent = await res.text();
+  }
 
-
-  <hr/>
-  <p>Variant cookie: <code>ab-variant</code> is set by CloudFront Function (A/B).</p>
+  async function contact() {
+    const name = document.getElementById('name').value;
+    const email = document.getElementById('email').value;
+    const message = document.getElementById('message').value;
+    const res = await fetch('/api/contact', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name, email, message })
+    });
+    document.getElementById('contactOut').textContent = await res.text();
+  }
+  </script>
 </body>
 </html>
