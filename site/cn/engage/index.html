@@ -50,25 +50,45 @@
 
   <script>
   async function subscribe() {
-    const email = document.getElementById('subEmail').value;
-    const res = await fetch('/api/subscribe', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ email })
-    });
-    document.getElementById('subOut').textContent = await res.text();
+    try {
+      const email = document.getElementById('subEmail').value;
+      const res = await fetch('/api/subscribe', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ email })
+      });
+      const message = await res.text();
+      document.getElementById('subOut').textContent = message;
+      if (res.ok) {
+        alert('订阅成功！');
+      } else {
+        alert(`订阅失败：${message || '请稍后重试。'}`);
+      }
+    } catch (error) {
+      alert('订阅失败：网络异常，请稍后重试。');
+    }
   }
 
   async function contact() {
-    const name = document.getElementById('name').value;
-    const email = document.getElementById('email').value;
-    const message = document.getElementById('message').value;
-    const res = await fetch('/api/contact', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ name, email, message })
-    });
-    document.getElementById('contactOut').textContent = await res.text();
+    try {
+      const name = document.getElementById('name').value;
+      const email = document.getElementById('email').value;
+      const message = document.getElementById('message').value;
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name, email, message })
+      });
+      const responseText = await res.text();
+      document.getElementById('contactOut').textContent = responseText;
+      if (res.ok) {
+        alert('消息发送成功！');
+      } else {
+        alert(`消息发送失败：${responseText || '请稍后重试。'}`);
+      }
+    } catch (error) {
+      alert('消息发送失败：网络异常，请稍后重试。');
+    }
   }
   </script>
 </body>
